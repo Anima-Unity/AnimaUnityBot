@@ -9,17 +9,24 @@ const reportHandler = (bot: Telegraf, ctx: Context, adminId: string): void => {
     return;
   }
 
-  // Mempersiapkan pesan laporan
-  let reportMessage = `Bot menerima pesan dari ${user.username || user.first_name}`;
-  reportMessage += `\nNama: ${user.first_name} ${user.last_name || ''}`;
-  
-  // Jika chat adalah grup, supergroup, atau channel, tambahkan nama grup
-  if (chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel') {
-    reportMessage += `\nGrup: ${chat.title || 'Tidak ada judul grup'}`;
-  }
+  // Mendapatkan nama bot
+  bot.telegram.getMe().then((botInfo) => {
+    const botName = botInfo.first_name;
 
-  // Mengirimkan laporan ke akun pribadi
-  bot.telegram.sendMessage(adminId, reportMessage);
+    // Mempersiapkan pesan laporan
+    let reportMessage = `Bot ${botName} menerima pesan dari @${user.username || user.first_name}`;
+    reportMessage += `\nNama: ${user.first_name} ${user.last_name || ''}`;
+    
+    // Jika chat adalah grup, supergroup, atau channel, tambahkan nama grup
+    if (chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel') {
+      reportMessage += `\nGrup: ${chat.title || 'Tidak ada judul grup'}`;
+    }
+
+    // Mengirimkan laporan ke akun pribadi
+    bot.telegram.sendMessage(adminId, reportMessage);
+  }).catch((error) => {
+    console.error('Error getting bot info:', error);
+  });
 };
 
 export { reportHandler };
