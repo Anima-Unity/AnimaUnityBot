@@ -1,22 +1,21 @@
-import { Context, Telegraf } from 'telegraf';
+import { Context } from 'telegraf';
 import axios from 'axios';
 import createDebug from 'debug';
+import * as googleTTS from 'google-tts-api';
 
-// Gantilah dengan API key Gemini Anda
 const GEMINI_API_KEY = 'AIzaSyA5R4PjUKHFFz4uZhIwHpZQ8V19uSp2JAE';
 const debug = createDebug('bot:geminiAi_command');
 
-// Menyimpan konteks percakapan untuk setiap pengguna
 const userContexts = new Map<number, string>();
-const MAX_CONTEXT_LENGTH = 2000; // Batasan karakter untuk konteks
+const MAX_CONTEXT_LENGTH = 2000;
+const MAX_TEXT_LENGTH = 200; // Panjang maksimum untuk setiap permintaan audio
 
-// Fungsi untuk mengirim permintaan ke Gemini API menggunakan axios
 const fetchFromGemini = async (text: string, userId: number) => {
   try {
     const previousContext = userContexts.get(userId) || '';
     let fullPrompt = `${previousContext}\n\nHuman: ${text}\n\nAI:`;
 
-    // Batasi ukuran konteks
+    // Batasi panjang konteks
     if (fullPrompt.length > MAX_CONTEXT_LENGTH) {
       fullPrompt = fullPrompt.slice(-MAX_CONTEXT_LENGTH);
     }
@@ -41,9 +40,10 @@ const fetchFromGemini = async (text: string, userId: number) => {
       }
     );
 
-    // Simpan konteks baru
     const newResponse = response.data.candidates[0]?.content?.parts[0]?.text || '';
-    userContexts.set(userId, fullPrompt + '\n' + newResponse);
+    
+    // Simpan hanya respons baru untuk konteks
+    userContexts.set(userId, `${text}\n${newResponse}`);
 
     return response.data;
   } catch (error) {
@@ -52,7 +52,6 @@ const fetchFromGemini = async (text: string, userId: number) => {
   }
 };
 
-// Fungsi untuk memformat pesan
 const formatMessage = (text: string): string => {
   let formattedText = '<pre>result</pre>\n\n';
   const lines = text.split('\n');
@@ -91,7 +90,6 @@ const formatMessage = (text: string): string => {
   return formattedText.trim();
 };
 
-// Fungsi untuk perintah /ai
 const geminiAi = () => async (ctx: Context) => {
   if (ctx.message && 'text' in ctx.message && ctx.message.text && 'from' in ctx.message) {
     const inputText = ctx.message.text.split(' ').slice(1).join(' ') || '';
@@ -103,35 +101,42 @@ const geminiAi = () => async (ctx: Context) => {
 
     debug(`Triggered "ai" command with input text: \n${inputText}`);
 
-    const geminiResponse = await fetchFromGemini(`${inputText} | anda membalas percakapan dengan style berdasarkan karakter typing user | anda dapat balas percakapan user dengan ringkas | jika anda mengirim sebuah url, gunakan https`, userId);
-
-    const message = (() => {
-      if (geminiResponse.error) {
-        debug(`Error generating content: ${geminiResponse.error}`);
-        return `An error occurred while generating content: ${geminiResponse.error}`;
-      } else {
-        const resultText = geminiResponse.candidates[0]?.content?.parts[0]?.text || 'No content generated.';
-        debug(`Generated content: \n${resultText}`);
-        return formatMessage(resultText);
-      }
-    })();
-
     try {
-      await ctx.replyWithHTML(message);
+      // Kirim pesan loading
+      const loadingMessage = await ctx.reply('Generating response, please wait...');
+
+      // Ambil respons dari Gemini
+      const geminiResponse = await fetchFromGemini(inputText, userId);
+
+      // Format pesan
+      const message = (() => {
+        if (geminiResponse.error) {
+          debug(`Error generating content: ${geminiResponse.error}`);
+          return `An error occurred while generating content: ${geminiResponse.error}`;
+        } else {
+          const resultText = geminiResponse.candidates[0]?.content?.parts[0]?.text || 'No content generated.';
+          debug(`Generated content: \n${resultText}`);
+          return formatMessage(resultText);
+        }
+      })();
+
+      // Kirim pesan baru dengan hasil
+      await ctx.reply(message, { parse_mode: 'HTML' });
+
+      // Hapus pesan loading jika berhasil
+      await ctx.deleteMessage(loadingMessage.message_id);
     } catch (error) {
       console.error('Error sending message:', error);
-      await ctx.reply('An error occurred while sending the formatted message. Here is the plain text version:');
-      await ctx.reply(message.replace(/<\/?[^>]+(>|$)/g, ""));
+      await ctx.reply('An error occurred while sending the message.');
     }
 
-    debug(`Sent formatted message: \n${message}`);
+    debug('Completed processing.');
   } else {
     debug('Received non-text message or no message.');
     await ctx.reply('Please send a text message.');
   }
 };
 
-// Fungsi untuk menghapus konteks percakapan
 const clearContext = () => async (ctx: Context) => {
   if (ctx.message && 'from' in ctx.message) {
     const userId = ctx.message.from.id;
@@ -140,5 +145,4 @@ const clearContext = () => async (ctx: Context) => {
   }
 };
 
-// Export fungsi-fungsi yang diperlukan
 export { geminiAi, clearContext };
