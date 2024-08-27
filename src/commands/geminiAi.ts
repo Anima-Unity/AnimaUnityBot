@@ -103,7 +103,7 @@ const geminiAi = () => async (ctx: Context) => {
 
     debug(`Triggered "ai" command with input text: \n${inputText}`);
 
-    const geminiResponse = await fetchFromGemini(`${inputText} | Gunakan format yang menarik dan lucu dan mudah dibaca dengan emoticon yang sesuai untuk setiap daftar list | kamu hanya menjawab pertanyaan seputar coding atau dunia IT, kamu tidak melayani pertanyaan atau percakapan di luar konteks itu | Jika ada yang meminta buat kode/koding/coding/code, cetak kode tersebut kedalam format code yang di dukung telegram`, userId);
+    const geminiResponse = await fetchFromGemini(`${inputText} | anda membalas percakapan dengan style berdasarkan karakter typing user | anda dapat balas percakapan user dengan ringkas | jika anda mengirim sebuah url, gunakan https`, userId);
 
     const message = (() => {
       if (geminiResponse.error) {
