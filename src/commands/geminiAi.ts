@@ -1,21 +1,37 @@
 import { Context } from 'telegraf';
 import axios from 'axios';
 import createDebug from 'debug';
-import * as googleTTS from 'google-tts-api';
 
 const GEMINI_API_KEY = 'AIzaSyA5R4PjUKHFFz4uZhIwHpZQ8V19uSp2JAE';
 const debug = createDebug('bot:geminiAi_command');
 
 const userContexts = new Map<number, string>();
 const MAX_CONTEXT_LENGTH = 2000;
-const MAX_TEXT_LENGTH = 200; // Panjang maksimum untuk setiap permintaan audio
+const MAX_TEXT_LENGTH = 4096;
+
+const formatMarkdown = (text: string): string => {
+  let formatted = text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+
+  formatted = formatted.replace(/\\`\\`\\`(\w*)\n([\s\S]*?)\\`\\`\\`/g, (_, lang, code) => {
+    return '```' + lang + '\n' + code.replace(/\\/g, '') + '```';
+  });
+
+  formatted = formatted.replace(/\\`([^`]+)\\`/g, '`$1`');
+
+  formatted = formatted.replace(/\n((?:\s*\|.*\|\s*\n)+)/g, (match) => {
+    return match.replace(/\\\|/g, '|').replace(/\\_/g, '_');
+  });
+
+  formatted = formatted.replace(/\\\[(.*?)\\\]\\\((.*?)\\\)/g, '[$1]($2)');
+
+  return formatted;
+};
 
 const fetchFromGemini = async (text: string, userId: number) => {
   try {
     const previousContext = userContexts.get(userId) || '';
-    let fullPrompt = `${previousContext}\n\nHuman: ${text}\n\nAI:`;
+    let fullPrompt = `${previousContext}\n\nHuman: ${text}\n\nAI: "Please respond in a way that aligns with the user's personality traits. Use MarkdownV2 formatting for your reply, including code blocks, tables, links, and other Markdown features.".\n\n`;
 
-    // Batasi panjang konteks
     if (fullPrompt.length > MAX_CONTEXT_LENGTH) {
       fullPrompt = fullPrompt.slice(-MAX_CONTEXT_LENGTH);
     }
@@ -41,53 +57,38 @@ const fetchFromGemini = async (text: string, userId: number) => {
     );
 
     const newResponse = response.data.candidates[0]?.content?.parts[0]?.text || '';
-    
-    // Simpan hanya respons baru untuk konteks
-    userContexts.set(userId, `${text}\n${newResponse}`);
+    const formattedText = formatMarkdown(newResponse);
+    userContexts.set(userId, `${text}\n${formattedText}`);
 
-    return response.data;
+    return { ...response.data, formattedText };
   } catch (error) {
     console.error('Error fetching data from Gemini API:', error);
     return { error: 'Failed to fetch data from Gemini API' };
   }
 };
 
-const formatMessage = (text: string): string => {
-  let formattedText = '<pre>result</pre>\n\n';
-  const lines = text.split('\n');
-  let insideCodeBlock = false;
-  let codeBlock = '';
+const splitMessage = (message: string) => {
+  const chunks: string[] = [];
+  let currentChunk = '';
+  let inCodeBlock = false;
 
-  lines.forEach(line => {
-    line = line.trim();
-
+  message.split('\n').forEach(line => {
     if (line.startsWith('```')) {
-      insideCodeBlock = !insideCodeBlock;
-      if (!insideCodeBlock) {
-        formattedText += `<pre>${codeBlock.trim()}</pre>\n`;
-        codeBlock = '';
-      }
-    } else if (insideCodeBlock) {
-      codeBlock += `${line}\n`;
-    } else if (line.startsWith('**') && line.endsWith('**')) {
-      formattedText += `<b>${line.replace(/\*\*/g, '')}</b>\n`;
-    } else if (line.startsWith('*')) {
-      formattedText += `• ${line.substring(1).trim()}\n`;
-    } else if (line.includes('**')) {
-      const parts = line.split('**');
-      formattedText += parts.map((part, index) => 
-        index % 2 === 1 ? `<b>${part}</b>` : part
-      ).join('') + '\n';
-    } else {
-      formattedText += `${line}\n`;
+      inCodeBlock = !inCodeBlock;
     }
+
+    if (currentChunk.length + line.length + 1 > MAX_TEXT_LENGTH && !inCodeBlock) {
+      chunks.push(currentChunk);
+      currentChunk = '';
+    }
+    currentChunk += (currentChunk ? '\n' : '') + line;
   });
 
-  if (insideCodeBlock) {
-    formattedText += `<pre>${codeBlock.trim()}</pre>\n`;
+  if (currentChunk) {
+    chunks.push(currentChunk);
   }
 
-  return formattedText.trim();
+  return chunks;
 };
 
 const geminiAi = () => async (ctx: Context) => {
@@ -102,28 +103,32 @@ const geminiAi = () => async (ctx: Context) => {
     debug(`Triggered "ai" command with input text: \n${inputText}`);
 
     try {
-      // Kirim pesan loading
       const loadingMessage = await ctx.reply('Generating response, please wait...');
 
-      // Ambil respons dari Gemini
       const geminiResponse = await fetchFromGemini(inputText, userId);
 
-      // Format pesan
       const message = (() => {
         if (geminiResponse.error) {
           debug(`Error generating content: ${geminiResponse.error}`);
           return `An error occurred while generating content: ${geminiResponse.error}`;
         } else {
-          const resultText = geminiResponse.candidates[0]?.content?.parts[0]?.text || 'No content generated.';
-          debug(`Generated content: \n${resultText}`);
-          return formatMessage(resultText);
+          debug(`Generated content: \n${geminiResponse.formattedText}`);
+          return geminiResponse.formattedText || 'No content generated.';
         }
       })();
 
-      // Kirim pesan baru dengan hasil
-      await ctx.reply(message, { parse_mode: 'HTML' });
+      const messages = splitMessage(message);
 
-      // Hapus pesan loading jika berhasil
+      for (const msg of messages) {
+        try {
+          await ctx.replyWithMarkdownV2(msg);
+        } catch (error) {
+          console.error('Error sending markdown message:', error);
+          await ctx.reply('Error sending formatted message. Here\'s the plain text:');
+          await ctx.reply(msg);
+        }
+      }
+
       await ctx.deleteMessage(loadingMessage.message_id);
     } catch (error) {
       console.error('Error sending message:', error);
