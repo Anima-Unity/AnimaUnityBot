@@ -1,5 +1,5 @@
 const formatMessage = (text: string): string => {
-  let formattedText = '<pre>result</pre>\n\n';
+  let formattedText = '<code>result</code> \n\n';
   const lines = text.split('\n');
   let insideCodeBlock = false;
   let codeBlock = '';
