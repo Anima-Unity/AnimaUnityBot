@@ -1,6 +1,7 @@
 const formatMessage = (text: string): string => {
-  let formattedText = '<code>result</code> \n\n';
+  let formattedText = '';
   const lines = text.split('\n');
+  
   let insideCodeBlock = false;
   let codeBlock = '';
 
@@ -18,15 +19,10 @@ const formatMessage = (text: string): string => {
     } else if (line.startsWith('>')) {
       formattedText += `<blockquote>${line.substring(1).trim()}</blockquote>\n`;
     } else {
-      const parts = line.split('`');
-      if (parts.length > 1) {
-        formattedText += parts.map((part, index) =>
-          index % 2 === 1 ? `<code>${part}</code>` : part
-        ).join('') + '\n';
-      } else if (line.startsWith('**') && line.endsWith('**')) {
-        formattedText += `<b>${line.replace(/\*\*/g, '')}</b>\n`;
-      } else if (line.startsWith('*') && !line.endsWith('**')) {
+      if (line.startsWith('•')) {
         formattedText += `• ${line.substring(1).trim()}\n`;
+      } else if (line.startsWith('**') && line.endsWith('**')) {
+        formattedText += `<b>${line.slice(2, -2)}</b>\n`;
       } else if (line.includes('**')) {
         const boldParts = line.split('**');
         formattedText += boldParts.map((part, index) =>
